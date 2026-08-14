@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 
+#include "core/FaceAnalyzer.h"
 #include "core/ImageConvert.h"
 #include "core/MotionDetector.h"
 #include "core/StorageManager.h"
@@ -15,6 +16,8 @@ PreviewChannel::PreviewChannel(int channelId,
                                ThreadPool* pool,
                                const QString& recordDir,
                                bool motionEnabled,
+                               FaceAnalyzer* faceAnalyzer,
+                               bool faceEnabled,
                                qint64 maxStorageBytes,
                                QObject* parent)
     : QObject(parent)
@@ -24,6 +27,8 @@ PreviewChannel::PreviewChannel(int channelId,
     , m_recordDir(recordDir)
     , m_motionEnabled(motionEnabled)
     , m_maxStorageBytes(maxStorageBytes)
+    , m_faceAnalyzer(faceAnalyzer)
+    , m_faceEnabled(faceEnabled)
 {
     m_motion.reset(new MotionDetector());
     m_recorder.reset(new VideoRecorder());
@@ -141,13 +146,46 @@ void PreviewChannel::consumeLoop()
         auto frame = m_buffer.waitAndPopNewest();
         if (!frame) continue;
 
-        PreviewChannel* self = this;
-        const int id = m_channelId;
-        m_pool->submit([self, id, frame]() {
-            const QImage image = matToQImage(*frame);
-            if (!image.isNull()) {
-                emit self->frameReady(id, image);
-            }
-        });
+        // 预览与人脸分析解耦：
+        // 1) 预览：直接在本线程转 QImage 并发出，不经过线程池 —— 画面永远是最新帧，无积压延迟
+        const QImage image = matToQImage(*frame);
+        if (!image.isNull()) {
+            emit frameReady(m_channelId, image);
+        }
+
+        // 2) 人脸分析：每 3 帧提交一次线程池（积压过多时跳过本轮），不阻塞预览
+        if (m_faceAnalyzer && m_faceEnabled && (++m_faceFrameCounter % 3) == 0) {
+            if (m_pool->pendingCount() >= m_maxPendingTasks) continue;
+
+            PreviewChannel* self = this;
+            const int id = m_channelId;
+            m_pool->submit([self, id, frame]() {
+                // 每次都做完整比对（任务本身已按 3 帧节流），结论必然确定：陌生人或姓名
+                const auto results = self->m_faceAnalyzer->analyze(*frame, true, false);
+
+                QVector<FaceBox> boxes;
+                boxes.reserve(static_cast<int>(results.size()));
+                for (const auto& r : results) {
+                    FaceBox b;
+                    b.x = r.face.x; b.y = r.face.y;
+                    b.w = r.face.width; b.h = r.face.height;
+                    b.name = r.name;
+                    b.known = r.known;
+                    boxes.append(b);
+                }
+                emit self->faceBoxes(id, boxes);
+
+                if (!results.empty()) {
+                    const FaceAnalyzer::Result& r = results.front();
+                    // 事件节流：同一路 5 秒最多上报一次，避免事件列表刷屏
+                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    qint64 last = self->m_lastFaceEventMs.load();
+                    if (now - last >= 5000 &&
+                        self->m_lastFaceEventMs.compare_exchange_strong(last, now)) {
+                        emit self->faceInfo(id, r.name, r.known, r.score, r.feature);
+                    }
+                }
+            });
+        }
     }
 }

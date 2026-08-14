@@ -80,9 +80,46 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QCheckBox" name="faceCheckBox">
+        <property name="text">
+         <string>人脸识别</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="nameEdit">
+        <property name="maximumSize">
+         <size>
+          <width>90</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="placeholderText">
+         <string>登记姓名</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="registerButton">
+        <property name="text">
+         <string>登记人脸</string>
+        </property>
+       </widget>
+      </item>
       <item><widget class="QPushButton" name="startStopButton">
         <property name="text">
          <string>启动预览</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="historyButton">
+        <property name="text">
+         <string>历史回放</string>
         </property>
        </widget>
       </item>

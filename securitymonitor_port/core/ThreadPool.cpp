@@ -30,6 +30,8 @@ void ThreadPool::stop()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_stop) return;
+        // 丢弃尚未开始的任务（它们引用的通道/人脸对象即将销毁，无需再执行）
+        m_tasks.clear();
         m_stop = true;
     }
     m_cv.notify_all();
@@ -37,6 +39,20 @@ void ThreadPool::stop()
         if (worker.joinable()) worker.join();
     }
     m_workers.clear();
+}
+
+void ThreadPool::drain()
+{
+    std::unique_lock<std::mutex> lock(m_mutex);
+    // 丢弃尚未开始的任务（引用即将销毁的通道对象），只等在途任务执行完
+    m_tasks.clear();
+    m_cv.wait(lock, [this] { return m_busy == 0; });
+}
+
+std::size_t ThreadPool::pendingCount() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_tasks.size();
 }
 
 void ThreadPool::workerLoop()
@@ -49,7 +65,10 @@ void ThreadPool::workerLoop()
             if (m_stop && m_tasks.empty()) return;
             task = std::move(m_tasks.front());
             m_tasks.pop_front();
+            ++m_busy;
         }
         task();
+        --m_busy;
+        m_cv.notify_all(); // 唤醒 drain()：队列已空且无任务在执行
     }
 }

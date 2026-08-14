@@ -5,11 +5,13 @@
 #include <QImage>
 #include <QObject>
 #include <QString>
+#include <QVector>
 
 #include <atomic>
 #include <memory>
 #include <thread>
 
+#include "core/FaceAnalyzer.h"
 #include "core/FrameBuffer.h"
 #include "core/ThreadPool.h"
 #include "core/VideoSource.h"
@@ -17,9 +19,19 @@
 class MotionDetector;
 class VideoRecorder;
 
+// 单个人脸框（主线程叠加绘制用）：坐标相对原始帧
+struct FaceBox
+{
+    int x = 0, y = 0, w = 0, h = 0;
+    QString name;   // 命中人员库时为姓名，否则为空
+    bool known = false;
+};
+Q_DECLARE_METATYPE(FaceBox)
+
 // 一路视频源的工作单元：采集线程 + 帧缓冲 + 消费线程。
 // 采集线程同时做运动检测：检测到运动自动开始录像，运动停止约0.5秒后结束录像。
-// 帧经共享线程池转换为 QImage 后通过信号发给界面（队列连接，主线程显示）。
+// 预览帧在消费线程直接转 QImage 发出（不经过线程池，保证实时）；
+// 人脸分析每 3 帧提交一次共享线程池（不阻塞预览），结果通过 faceBoxes 发给主线程叠加绘制。
 class PreviewChannel : public QObject
 {
     Q_OBJECT
@@ -30,6 +42,8 @@ public:
                             ThreadPool* pool,
                             const QString& recordDir,
                             bool motionEnabled,
+                            FaceAnalyzer* faceAnalyzer = nullptr,
+                            bool faceEnabled = false,
                             qint64 maxStorageBytes = 0,
                             QObject* parent = nullptr);
     ~PreviewChannel() override;
@@ -48,6 +62,11 @@ signals:
     void channelOffline(int channelId, const QString& reason);
     void recordingStarted(int channelId, const QString& filePath);
     void recordingStopped(int channelId, const QString& filePath, qint64 durationMs);
+    // 人脸识别结果（feature 供登记使用；known=false 即陌生人）
+    void faceInfo(int channelId, const QString& name, bool known,
+                  double distance, const QByteArray& feature);
+    // 最新人脸框（含识别结论：known/姓名），主线程叠加到预览画面
+    void faceBoxes(int channelId, const QVector<FaceBox>& boxes);
 
 private:
     void captureLoop();
@@ -73,6 +92,13 @@ private:
     // 录像存储上限(字节)，<=0 表示不限制；超限时从最旧录像开始删除
     qint64 m_maxStorageBytes = 0;
     QElapsedTimer m_lastQuotaCheck;  // 节流：避免每停止一段都全量扫描
+
+    // 人脸识别（共享实例，不持有所有权；由主窗口加载模型与人员库）
+    FaceAnalyzer* m_faceAnalyzer = nullptr;
+    bool m_faceEnabled = false;
+    std::atomic<int> m_faceFrameCounter{0};      // 人脸分析节流计数（每 3 帧一次）
+    std::atomic<qint64> m_lastFaceEventMs{0};    // 陌生人/识别事件 5 秒节流
+    static const int m_maxPendingTasks = 6;      // 线程池积压上限：超限跳过本轮人脸分析
 };
 
 #endif // PREVIEWCHANNEL_H

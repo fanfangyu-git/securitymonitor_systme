@@ -1,6 +1,7 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -24,6 +25,12 @@ public:
     // 停止所有 worker 并回收线程（重复调用安全）
     void stop();
 
+    // 等待所有已提交任务执行完毕（不停止线程池，之后仍可继续 submit）
+    void drain();
+
+    // 当前排队中的任务数（用于背压：积压过多时上游可丢帧保实时）
+    std::size_t pendingCount() const;
+
     int workerCount() const { return m_workerCount; }
 
 private:
@@ -31,9 +38,10 @@ private:
 
     std::vector<std::thread> m_workers;
     std::deque<std::function<void()>> m_tasks;
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_stop = false;
+    std::atomic<int> m_busy{0}; // 正在执行的任务数（drain 用）
     int m_workerCount;
 };
 

@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QVariant>
 
 DatabaseManager& DatabaseManager::instance()
 {
@@ -80,6 +81,47 @@ bool DatabaseManager::addEvent(const QString& type, const QString& sourceName, c
     return true;
 }
 
+QVector<DatabaseManager::PersonInfo> DatabaseManager::loadPersons()
+{
+    QVector<PersonInfo> persons;
+    if (!m_initialized) return persons;
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT id, name, face_feature FROM person ORDER BY id")) {
+        qWarning() << "读取人员库失败:" << query.lastError().text();
+        return persons;
+    }
+    while (query.next()) {
+        PersonInfo p;
+        p.id = query.value(0).toInt();
+        p.name = query.value(1).toString();
+        p.feature = query.value(2).toByteArray();
+        persons.push_back(p);
+    }
+    return persons;
+}
+
+bool DatabaseManager::addPerson(const QString& name, const QByteArray& feature, int* outId)
+{
+    if (!m_initialized) {
+        qWarning() << "数据库未初始化，人员登记失败:" << name;
+        return false;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO person (name, face_feature) VALUES (?, ?)");
+    query.addBindValue(name);
+    query.addBindValue(feature);
+    if (!query.exec()) {
+        qWarning() << "人员登记失败:" << query.lastError().text();
+        return false;
+    }
+    if (outId) *outId = query.lastInsertId().toInt();
+    return true;
+}
+
 bool DatabaseManager::addVideoFile(const QString& sourceName, const QString& filePath,
                                    const QString& startTime, const QString& endTime,
                                    const QString& eventType, qint64 sizeBytes)
@@ -140,6 +182,76 @@ bool DatabaseManager::deleteVideoByPath(const QString& filePath)
         return false;
     }
     return true;
+}
+
+QVector<DatabaseManager::EventInfo> DatabaseManager::queryEvents(
+    const QString& type, const QString& startTime, const QString& endTime)
+{
+    QVector<EventInfo> events;
+    if (!m_initialized) return events;
+
+    QMutexLocker locker(&m_mutex);
+    QString sql = QStringLiteral("SELECT id, type, source_name, detail, happened_at FROM event WHERE 1=1");
+    if (!type.isEmpty()) sql += QStringLiteral(" AND type = ?");
+    if (!startTime.isEmpty()) sql += QStringLiteral(" AND happened_at >= ?");
+    if (!endTime.isEmpty()) sql += QStringLiteral(" AND happened_at <= ?");
+    sql += QStringLiteral(" ORDER BY id DESC LIMIT 500");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (!type.isEmpty()) query.addBindValue(type);
+    if (!startTime.isEmpty()) query.addBindValue(startTime);
+    if (!endTime.isEmpty()) query.addBindValue(endTime);
+    if (!query.exec()) {
+        qWarning() << "查询历史事件失败:" << query.lastError().text();
+        return events;
+    }
+    while (query.next()) {
+        EventInfo e;
+        e.id = query.value(0).toInt();
+        e.type = query.value(1).toString();
+        e.sourceName = query.value(2).toString();
+        e.detail = query.value(3).toString();
+        e.happenedAt = query.value(4).toString();
+        events.push_back(e);
+    }
+    return events;
+}
+
+QVector<DatabaseManager::VideoFileInfo> DatabaseManager::queryVideoFiles(
+    const QString& eventType, const QString& startTime, const QString& endTime)
+{
+    QVector<VideoFileInfo> files;
+    if (!m_initialized) return files;
+
+    QMutexLocker locker(&m_mutex);
+    QString sql = QStringLiteral("SELECT id, source_name, file_path, start_time, end_time, event_type, size_bytes FROM video_file WHERE 1=1");
+    if (!eventType.isEmpty()) sql += QStringLiteral(" AND event_type = ?");
+    if (!startTime.isEmpty()) sql += QStringLiteral(" AND start_time >= ?");
+    if (!endTime.isEmpty()) sql += QStringLiteral(" AND start_time <= ?");
+    sql += QStringLiteral(" ORDER BY id DESC LIMIT 500");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (!eventType.isEmpty()) query.addBindValue(eventType);
+    if (!startTime.isEmpty()) query.addBindValue(startTime);
+    if (!endTime.isEmpty()) query.addBindValue(endTime);
+    if (!query.exec()) {
+        qWarning() << "查询历史录像失败:" << query.lastError().text();
+        return files;
+    }
+    while (query.next()) {
+        VideoFileInfo f;
+        f.id = query.value(0).toInt();
+        f.sourceName = query.value(1).toString();
+        f.filePath = query.value(2).toString();
+        f.startTime = query.value(3).toString();
+        f.endTime = query.value(4).toString();
+        f.eventType = query.value(5).toString();
+        f.sizeBytes = query.value(6).toLongLong();
+        files.push_back(f);
+    }
+    return files;
 }
 
 bool DatabaseManager::createTables()

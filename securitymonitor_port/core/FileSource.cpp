@@ -11,7 +11,7 @@ FileSource::FileSource(const QString& filePath, bool loop)
 bool FileSource::open()
 {
     if (m_capture.isOpened()) return true;
-    m_capture.open(m_filePath.toStdString());
+    m_capture.open(m_filePath.toLocal8Bit().constData());
     return m_capture.isOpened();
 }
 

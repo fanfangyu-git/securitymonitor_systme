@@ -1,9 +1,11 @@
 #ifndef DATABASEMANAGER_H
 #define DATABASEMANAGER_H
 
+#include <QByteArray>
 #include <QMutex>
 #include <QSqlDatabase>
 #include <QString>
+#include <QVector>
 
 // 数据库单例：负责连接 SQLite 并确保基础表存在
 class DatabaseManager
@@ -27,6 +29,48 @@ public:
 
     // 按路径删除录像记录，并清理关联的 event 记录（事务）
     bool deleteVideoByPath(const QString& filePath);
+
+    // 历史事件记录（智能回放查询用）
+    struct EventInfo
+    {
+        int id = -1;
+        QString type;
+        QString sourceName;
+        QString detail;
+        QString happenedAt;
+    };
+
+    // 历史录像文件记录（智能回放查询用）
+    struct VideoFileInfo
+    {
+        int id = -1;
+        QString sourceName;
+        QString filePath;
+        QString startTime;
+        QString endTime;
+        QString eventType;
+        qint64 sizeBytes = 0;
+    };
+
+    // 按条件查询历史事件（type / 时间范围可空），按时间倒序，最多 500 条
+    QVector<EventInfo> queryEvents(const QString& type = QString(),
+                                   const QString& startTime = QString(),
+                                   const QString& endTime = QString());
+
+    // 按条件查询历史录像（eventType / 时间范围可空），按开始时间倒序
+    QVector<VideoFileInfo> queryVideoFiles(const QString& eventType = QString(),
+                                           const QString& startTime = QString(),
+                                           const QString& endTime = QString());
+
+    // 人员库（人脸登记）：face_feature 为 128 维特征序列化后的 512 字节
+    struct PersonInfo
+    {
+        int id = -1;
+        QString name;
+        QByteArray feature;
+    };
+    QVector<PersonInfo> loadPersons();
+    bool addPerson(const QString& name, const QByteArray& feature, int* outId = nullptr);
 
     bool isOpen() const;
     QSqlDatabase database() const;

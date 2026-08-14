@@ -18,6 +18,8 @@ LIBS += -LD:/openCV4.5.5/x64/mingw/bin -lopencv_world455
 SOURCES += \
     main.cpp \
     mainwindow.cpp \
+    PlaybackWindow.cpp \
+    HistoryDialog.cpp \
     core/ThreadPool.cpp \
     core/FrameBuffer.cpp \
     core/VideoSource.cpp \
@@ -28,10 +30,13 @@ SOURCES += \
     core/MotionDetector.cpp \
     core/VideoRecorder.cpp \
     core/StorageManager.cpp \
+    core/FaceAnalyzer.cpp \
     service/DatabaseManager.cpp
 
 HEADERS += \
     mainwindow.h \
+    PlaybackWindow.h \
+    HistoryDialog.h \
     core/ThreadPool.h \
     core/FrameBuffer.h \
     core/VideoSource.h \
@@ -43,6 +48,7 @@ HEADERS += \
     core/MotionDetector.h \
     core/VideoRecorder.h \
     core/StorageManager.h \
+    core/FaceAnalyzer.h \
     service/DatabaseManager.h
 
 FORMS += \
@@ -52,3 +58,10 @@ FORMS += \
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
+
+# 构建后自动复制运行库到 exe 目录，避免 Clean 重编后缺 DLL 导致"启动程序失败"（自包含，不依赖 PATH）
+win32 {
+    OPENCV_BIN = D:/openCV4.5.5/x64/mingw/bin
+    MINGW_BIN  = D:/Qt/Qt5.14.2/Tools/mingw730_64/bin
+    QMAKE_POST_LINK = $$quote(cmd /c copy /Y "$$OPENCV_BIN/*.dll" "$$OUT_PWD/" & cmd /c copy /Y "$$MINGW_BIN/libgcc_s_seh-1.dll" "$$OUT_PWD/" & cmd /c copy /Y "$$MINGW_BIN/libstdc++-6.dll" "$$OUT_PWD/" & cmd /c copy /Y "$$MINGW_BIN/libwinpthread-1.dll" "$$OUT_PWD/")
+}
