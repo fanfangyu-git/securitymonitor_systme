@@ -26,6 +26,8 @@ HistoryDialog::HistoryDialog(ThreadPool* pool, QWidget* parent)
     , m_pool(pool)
 {
     setWindowTitle(QStringLiteral("历史检索与回放"));
+    // 本对话框在 MainWindow 中以堆对象 + show() 非模态方式使用，
+    // WA_DeleteOnClose 由 Qt 在关闭时 deleteLater 回收（不能配栈对象/exec 使用）
     setAttribute(Qt::WA_DeleteOnClose);
     resize(860, 560);
 
@@ -38,7 +40,7 @@ HistoryDialog::HistoryDialog(ThreadPool* pool, QWidget* parent)
     const QStringList types = {
         QStringLiteral("online"), QStringLiteral("offline"),
         QStringLiteral("motion"), QStringLiteral("motion_end"),
-        QStringLiteral("stranger"), QStringLiteral("known"),
+        QStringLiteral("stranger"), QStringLiteral("stranger_capture"), QStringLiteral("known"),
         QStringLiteral("register"), QStringLiteral("face_error")
     };
     for (const QString& t : types) m_eventTypeCombo->addItem(t, t);
@@ -56,6 +58,8 @@ HistoryDialog::HistoryDialog(ThreadPool* pool, QWidget* parent)
     m_eventTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_eventTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_eventTable->setAlternatingRowColors(true);
+    m_eventTable->setTextElideMode(Qt::ElideNone); // 长文本不省略，靠拖动列宽查看
+    m_eventTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     connect(m_eventTable, &QTableWidget::cellDoubleClicked,
             this, &HistoryDialog::onEventDoubleClicked);
 
@@ -91,6 +95,8 @@ HistoryDialog::HistoryDialog(ThreadPool* pool, QWidget* parent)
     m_videoTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_videoTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_videoTable->setAlternatingRowColors(true);
+    m_videoTable->setTextElideMode(Qt::ElideNone); // 长文本不省略，靠拖动列宽查看
+    m_videoTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_videoTable->verticalHeader()->setDefaultSectionSize(80);
     connect(m_videoTable, &QTableWidget::cellDoubleClicked,
             this, &HistoryDialog::onVideoDoubleClicked);
@@ -132,6 +138,9 @@ void HistoryDialog::refreshEvents()
         m_eventTable->setItem(i, 1, new QTableWidgetItem(e.type));
         m_eventTable->setItem(i, 2, new QTableWidgetItem(e.sourceName));
         m_eventTable->setItem(i, 3, new QTableWidgetItem(e.detail));
+        for (int col = 0; col < 4; ++col) { // 悬停显示完整内容
+            if (QTableWidgetItem* it = m_eventTable->item(i, col)) it->setToolTip(it->text());
+        }
     }
 }
 
@@ -152,6 +161,9 @@ void HistoryDialog::refreshVideos()
             : QStringLiteral("-");
         m_videoTable->setItem(i, 5, new QTableWidgetItem(sizeText));
         m_videoTable->setItem(i, 0, new QTableWidgetItem(QStringLiteral("生成中…")));
+        for (int col = 1; col < 6; ++col) { // 悬停显示完整内容
+            if (QTableWidgetItem* it = m_videoTable->item(i, col)) it->setToolTip(it->text());
+        }
 
         // 异步生成首帧缩略图（共享线程池，QPointer 防窗口关闭后悬挂）
         const int row = i;
@@ -213,6 +225,7 @@ void HistoryDialog::onThumbnailReady(int row, const QImage& image)
 
 void HistoryDialog::openPlayback(const QString& filePath, const QString& title)
 {
-    auto* win = new PlaybackWindow(filePath, title, this);
+    // 无父窗口顶层窗口：关闭历史检索时不影响正在回放的窗口
+    auto* win = new PlaybackWindow(filePath, title);
     win->show();
 }

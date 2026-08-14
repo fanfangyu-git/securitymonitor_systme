@@ -72,6 +72,15 @@ public:
     QVector<PersonInfo> loadPersons();
     bool addPerson(const QString& name, const QByteArray& feature, int* outId = nullptr);
 
+    // ---- 管理员（登记人脸权限）----
+    // 默认管理员账号（首次运行自动创建，密码建议登录后修改）
+    static QString defaultAdminUsername() { return QStringLiteral("admin"); }
+    static QString defaultAdminPassword() { return QStringLiteral("admin123"); }
+    bool ensureDefaultAdmin();
+    bool verifyAdmin(const QString& username, const QString& password);
+    bool changeAdminPassword(const QString& username,
+                             const QString& oldPassword, const QString& newPassword);
+
     bool isOpen() const;
     QSqlDatabase database() const;
 
@@ -82,6 +91,8 @@ private:
     DatabaseManager& operator=(const DatabaseManager&) = delete;
 
     bool createTables();
+
+    static QString hashPassword(const QString& password, const QString& salt);
 
     QSqlDatabase m_db;
     bool m_initialized = false;

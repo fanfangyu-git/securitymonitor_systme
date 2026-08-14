@@ -19,6 +19,7 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
+class HistoryDialog;
 class QLabel;
 class QTimer;
 
@@ -58,6 +59,7 @@ private slots:
     void onRegisterClicked();
     void onEventItemDoubleClicked(QListWidgetItem* item);
     void onHistoryClicked();
+    void onStrangerCapture(int channelId, const QString& filePath);
 
 private:
     bool startPreview();
@@ -68,6 +70,7 @@ private:
                      const QString& sourceName, const QString& detail);
     void setLabelRecording(int channelId, bool recording);
     QString recordDirectory() const;
+    void updateAdminStatus();
 
     Ui::MainWindow *ui;
 
@@ -86,6 +89,8 @@ private:
     QVector<QVector<FaceBox>> m_faceBoxes; // 每路最近一次人脸框（主线程叠加绘制）
     qint64 m_maxStorageBytes = 0;  // 录像存储上限(字节)，0=不限制
     QTimer* m_quotaTimer = nullptr; // 容量检查兜底定时器（30 分钟）
+    bool m_adminAuthed = false;   // 管理员已通过验证（本会话有效，登记人脸用）
+    HistoryDialog* m_historyDlg = nullptr; // 历史回放对话框（非模态，防重复打开）
     bool m_previewRunning = false;
     int m_runningCount = 0;
 

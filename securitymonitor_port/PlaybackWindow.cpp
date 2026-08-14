@@ -107,6 +107,9 @@ void PlaybackWindow::onNextFrame()
         m_slider->setValue(0);
         updateTimeLabel(0);
         if (m_cap.read(frame)) showFrame(frame);
+        // 播放结束：把窗口抬到前台，等待用户操作（重播/暂停/关闭），不跳到后台
+        raise();
+        activateWindow();
         return;
     }
     showFrame(frame);

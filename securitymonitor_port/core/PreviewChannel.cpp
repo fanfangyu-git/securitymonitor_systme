@@ -4,6 +4,9 @@
 #include <thread>
 
 #include <QDateTime>
+#include <QDir>
+
+#include <opencv2/imgcodecs.hpp>
 
 #include "core/FaceAnalyzer.h"
 #include "core/ImageConvert.h"
@@ -161,7 +164,35 @@ void PreviewChannel::consumeLoop()
             const int id = m_channelId;
             m_pool->submit([self, id, frame]() {
                 // 每次都做完整比对（任务本身已按 3 帧节流），结论必然确定：陌生人或姓名
-                const auto results = self->m_faceAnalyzer->analyze(*frame, true, false);
+                auto results = self->m_faceAnalyzer->analyze(*frame, true, false);
+
+                // 身份平滑（主脸）：快速移动/运动模糊时单帧可能把已知人员误判成陌生人，
+                // 连续 m_identityConfirmFrames 次一致才切换身份，避免红绿闪烁
+                if (!results.empty()) {
+                    FaceAnalyzer::Result& primary = results.front();
+                    QMutexLocker lock(&self->m_faceStateMutex);
+                    const bool sameAsStable =
+                        (primary.name == self->m_stableName) &&
+                        (primary.known == self->m_stableKnown);
+                    if (sameAsStable) {
+                        self->m_candidateCount = 0;
+                    } else if (primary.name == self->m_candidateName &&
+                               primary.known == self->m_candidateKnown) {
+                        ++self->m_candidateCount;
+                    } else {
+                        self->m_candidateName = primary.name;
+                        self->m_candidateKnown = primary.known;
+                        self->m_candidateCount = 1;
+                    }
+                    if (self->m_candidateCount >= self->m_identityConfirmFrames) {
+                        self->m_stableName = self->m_candidateName;
+                        self->m_stableKnown = self->m_candidateKnown;
+                        self->m_candidateCount = 0;
+                    }
+                    // 用稳定身份覆盖主脸判定（画框/事件/截图全部走平滑后结果）
+                    primary.name = self->m_stableName;
+                    primary.known = self->m_stableKnown;
+                }
 
                 QVector<FaceBox> boxes;
                 boxes.reserve(static_cast<int>(results.size()));
@@ -183,6 +214,23 @@ void PreviewChannel::consumeLoop()
                     if (now - last >= 5000 &&
                         self->m_lastFaceEventMs.compare_exchange_strong(last, now)) {
                         emit self->faceInfo(id, r.name, r.known, r.score, r.feature);
+                    }
+
+                    // 陌生人自动截图：同一路 30 秒最多一张，保存分析过的那一帧
+                    if (!r.known) {
+                        const qint64 nowCap = QDateTime::currentMSecsSinceEpoch();
+                        qint64 lastCap = self->m_lastCaptureMs.load();
+                        if (nowCap - lastCap >= self->m_captureIntervalMs &&
+                            self->m_lastCaptureMs.compare_exchange_strong(lastCap, nowCap)) {
+                            const QString capDir = self->m_recordDir + QStringLiteral("/captures");
+                            QDir().mkpath(capDir);
+                            const QString capPath = capDir + QStringLiteral("/stranger_ch%1_%2.jpg")
+                                .arg(id + 1)
+                                .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz"));
+                            if (cv::imwrite(capPath.toLocal8Bit().constData(), *frame)) {
+                                emit self->strangerCapture(id, capPath);
+                            }
+                        }
                     }
                 }
             });

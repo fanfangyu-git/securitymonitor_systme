@@ -23,10 +23,13 @@
 #include "core/StorageManager.h"
 #include "core/SyntheticSource.h"
 #include "service/DatabaseManager.h"
+#include "AdminLoginDialog.h"
 #include "HistoryDialog.h"
 #include "PlaybackWindow.h"
 
+#include <QDesktopServices>
 #include <QListWidgetItem>
+#include <QUrl>
 #include <QVariantMap>
 
 MainWindow::MainWindow(bool testMode, const QStringList& fileSources,
@@ -41,6 +44,8 @@ MainWindow::MainWindow(bool testMode, const QStringList& fileSources,
     , m_maxStorageBytes(maxStorageBytes)
 {
     ui->setupUi(this);
+
+    updateAdminStatus(); // 管理员状态提示（初始未登录，登记人脸需先验证）
 
     // 路数下拉框数据：0->1路 1->2路 2->4路
     ui->channelCombo->setItemData(0, 1);
@@ -250,6 +255,8 @@ void MainWindow::setupChannels(int count)
                 this, &MainWindow::onFaceInfo, Qt::QueuedConnection);
         connect(channel.get(), &PreviewChannel::faceBoxes,
                 this, &MainWindow::onFaceBoxes, Qt::QueuedConnection);
+        connect(channel.get(), &PreviewChannel::strangerCapture,
+                this, &MainWindow::onStrangerCapture, Qt::QueuedConnection);
         m_channels.push_back(std::move(channel));
 
         // 每路一个预览标签（动态创建：路数可变，由数据驱动）
@@ -398,6 +405,7 @@ void MainWindow::appendEvent(const QString& text, const QString& type,
                              .arg(QTime::currentTime().toString("HH:mm:ss"))
                              .arg(text);
     QListWidgetItem* item = new QListWidgetItem(line);
+    item->setToolTip(line); // 长文本省略时鼠标悬停查看完整内容
     item->setData(Qt::UserRole, QVariantMap{
         {QStringLiteral("type"), type},
         {QStringLiteral("detail"), detail}});
@@ -434,6 +442,13 @@ void MainWindow::onFaceBoxes(int channelId, const QVector<FaceBox>& boxes)
 
 void MainWindow::onRegisterClicked()
 {
+    // 管理员权限：登记人脸需先通过管理员验证（本会话内有效，重启后需重新登录）
+    if (!m_adminAuthed) {
+        if (!AdminLoginDialog::execLogin(this)) return;
+        m_adminAuthed = true;
+        updateAdminStatus();
+    }
+
     const QString name = ui->nameEdit->text().trimmed();
     if (name.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("提示"),
@@ -477,6 +492,9 @@ void MainWindow::onEventItemDoubleClicked(QListWidgetItem* item)
             QStringLiteral("回放：%1（%2 事件）").arg(QFileInfo(detail).fileName()).arg(type),
             this);
         win->show();
+    } else if (detail.endsWith(QStringLiteral(".jpg"), Qt::CaseInsensitive) &&
+               QFileInfo::exists(detail)) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(detail)); // 截图直接用系统看图打开
     } else {
         QMessageBox::information(this, QStringLiteral("提示"),
                                  QStringLiteral("该事件没有关联录像文件。"));
@@ -485,8 +503,16 @@ void MainWindow::onEventItemDoubleClicked(QListWidgetItem* item)
 
 void MainWindow::onHistoryClicked()
 {
-    HistoryDialog dlg(m_pool.get(), this);
-    dlg.exec();
+    // 非模态独立窗口：模态 exec 会禁用主程序所有窗口，导致从其中弹出的回放窗口无法交互、关闭后回放落到主窗口后面
+    if (m_historyDlg) {
+        m_historyDlg->raise();
+        m_historyDlg->activateWindow();
+        return;
+    }
+    auto* dlg = new HistoryDialog(m_pool.get(), this);
+    m_historyDlg = dlg;
+    connect(dlg, &QObject::destroyed, this, [this]() { m_historyDlg = nullptr; });
+    dlg->show();
 }
 void MainWindow::setLabelRecording(int channelId, bool recording)
 {
@@ -498,5 +524,25 @@ void MainWindow::setLabelRecording(int channelId, bool recording)
     } else {
         m_previewLabels[channelId]->setStyleSheet(
             QStringLiteral("background-color: #101010; color: #888888; font-size: 14px;"));
+    }
+}
+void MainWindow::onStrangerCapture(int channelId, const QString& filePath)
+{
+    appendEvent(QStringLiteral("第 %1 路 陌生人截图: %2")
+                    .arg(channelId + 1).arg(QFileInfo(filePath).fileName()),
+                QStringLiteral("stranger_capture"),
+                QStringLiteral("第 %1 路").arg(channelId + 1),
+                filePath);
+}
+
+void MainWindow::updateAdminStatus()
+{
+    if (!ui->adminStatusLabel) return;
+    if (m_adminAuthed) {
+        ui->adminStatusLabel->setText(QStringLiteral("管理员：已登录"));
+        ui->adminStatusLabel->setStyleSheet(QStringLiteral("color: #2e7d32;"));
+    } else {
+        ui->adminStatusLabel->setText(QStringLiteral("管理员：未登录"));
+        ui->adminStatusLabel->setStyleSheet(QStringLiteral("color: #c0504d;"));
     }
 }

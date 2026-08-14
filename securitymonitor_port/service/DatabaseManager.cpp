@@ -5,6 +5,9 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+#include <QCryptographicHash>
+#include <QRandomGenerator>
+
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager manager;
@@ -29,6 +32,12 @@ bool DatabaseManager::init(const QString& dbPath)
     }
 
     m_initialized = true;
+
+    // 确保管理员账号存在（首次运行写入默认 admin/admin123）
+    if (!ensureDefaultAdmin()) {
+        qWarning() << "初始化默认管理员失败";
+    }
+
     qDebug() << "数据库初始化成功:" << dbPath;
     return true;
 }
@@ -293,5 +302,94 @@ bool DatabaseManager::createTables()
         return false;
     }
 
+    // 管理员账号表（登记人脸权限控制；密码加盐 SHA-256 存储，不存明文）
+    if (!query.exec("CREATE TABLE IF NOT EXISTS admin ("
+                    "username TEXT PRIMARY KEY,"
+                    "password_hash TEXT NOT NULL,"
+                    "salt TEXT NOT NULL,"
+                    "updated_at TEXT DEFAULT (datetime('now','localtime')))")) {
+        qWarning() << "创建 admin 表失败:" << query.lastError().text();
+        return false;
+    }
+
     return true;
+}
+// ---- 管理员（登记人脸权限）----
+
+QString DatabaseManager::hashPassword(const QString& password, const QString& salt)
+{
+    // 加盐 SHA-256：salt + password 拼接后哈希，十六进制存储
+    const QByteArray data = (salt + password).toUtf8();
+    return QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+}
+
+bool DatabaseManager::ensureDefaultAdmin()
+{
+    if (!m_initialized) return false;
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT COUNT(*) FROM admin")) {
+        qWarning() << "查询 admin 表失败:" << query.lastError().text();
+        return false;
+    }
+    if (query.next() && query.value(0).toInt() > 0) return true; // 已有账号
+
+    // 首次运行：写入默认管理员 admin / admin123
+    const quint64 s1 = QRandomGenerator::global()->generate64();
+    const quint64 s2 = QRandomGenerator::global()->generate64();
+    const QString salt = QString::number(s1, 16) + QString::number(s2, 16);
+    query.prepare("INSERT INTO admin (username, password_hash, salt) VALUES (?, ?, ?)");
+    query.addBindValue(defaultAdminUsername());
+    query.addBindValue(hashPassword(defaultAdminPassword(), salt));
+    query.addBindValue(salt);
+    if (!query.exec()) {
+        qWarning() << "写入默认管理员失败:" << query.lastError().text();
+        return false;
+    }
+    qInfo() << "已创建默认管理员账号:" << defaultAdminUsername();
+    return true;
+}
+
+bool DatabaseManager::verifyAdmin(const QString& username, const QString& password)
+{
+    if (!m_initialized) return false;
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    query.prepare("SELECT password_hash, salt FROM admin WHERE username = ?");
+    query.addBindValue(username);
+    if (!query.exec()) {
+        qWarning() << "查询管理员失败:" << query.lastError().text();
+        return false;
+    }
+    if (!query.next()) return false; // 账号不存在
+
+    const QString stored = query.value(0).toString();
+    const QString salt = query.value(1).toString();
+    return stored == hashPassword(password, salt);
+}
+
+bool DatabaseManager::changeAdminPassword(const QString& username,
+                                          const QString& oldPassword,
+                                          const QString& newPassword)
+{
+    if (!m_initialized || newPassword.isEmpty()) return false;
+    if (!verifyAdmin(username, oldPassword)) return false;
+
+    QMutexLocker locker(&m_mutex);
+    const quint64 s1 = QRandomGenerator::global()->generate64();
+    const quint64 s2 = QRandomGenerator::global()->generate64();
+    const QString salt = QString::number(s1, 16) + QString::number(s2, 16);
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE admin SET password_hash = ?, salt = ?, "
+                  "updated_at = datetime('now','localtime') WHERE username = ?");
+    query.addBindValue(hashPassword(newPassword, salt));
+    query.addBindValue(salt);
+    query.addBindValue(username);
+    if (!query.exec()) {
+        qWarning() << "修改管理员密码失败:" << query.lastError().text();
+        return false;
+    }
+    return query.numRowsAffected() > 0;
 }

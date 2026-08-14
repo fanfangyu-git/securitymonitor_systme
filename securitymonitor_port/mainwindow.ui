@@ -110,6 +110,16 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QLabel" name="adminStatusLabel">
+        <property name="text">
+         <string>管理员：未登录</string>
+        </property>
+        <property name="styleSheet">
+         <string>color: #c0504d;</string>
+        </property>
+       </widget>
+      </item>
       <item><widget class="QPushButton" name="startStopButton">
         <property name="text">
          <string>启动预览</string>

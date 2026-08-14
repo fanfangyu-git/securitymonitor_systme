@@ -31,6 +31,22 @@ int main(int argc, char *argv[])
     if (!DatabaseManager::instance().init(dbPath)) {
         qWarning() << "数据库初始化失败，程序继续运行（不影响预览功能）";
     }
+    // --admin-selftest：管理员验证自检，输出到 admin_selftest.txt 后退出
+    if (args.contains(QStringLiteral("--admin-selftest"))) {
+        QFile af(QCoreApplication::applicationDirPath() + "/admin_selftest.txt");
+        af.open(QIODevice::WriteOnly | QIODevice::Text);
+        QTextStream as(&af);
+        as.setCodec("UTF-8");
+        const QString admin = DatabaseManager::instance().defaultAdminUsername();
+        const QString pwd = DatabaseManager::instance().defaultAdminPassword();
+        const bool defaultOk = DatabaseManager::instance().verifyAdmin(admin, pwd);
+        const bool wrongRejected = !DatabaseManager::instance().verifyAdmin(admin, QStringLiteral("wrong-password"));
+        as << QStringLiteral("默认账号存在且密码正确: ") << (defaultOk ? QStringLiteral("是") : QStringLiteral("否")) << "\n";
+        as << QStringLiteral("错误密码被拒绝: ") << (wrongRejected ? QStringLiteral("是") : QStringLiteral("否")) << "\n";
+        as.flush();
+        return 0;
+    }
+
     // --history-dump：历史查询自检，输出事件/录像到 history_selftest.txt 后退出
     if (args.contains(QStringLiteral("--history-dump"))) {
         QFile hf(QCoreApplication::applicationDirPath() + "/history_selftest.txt");
