@@ -45,7 +45,42 @@
        <number>8</number>
       </property>
       <item>
-       <widget class="QPushButton" name="startStopButton">
+       <widget class="QLabel" name="channelLabel">
+        <property name="text">
+         <string>路数:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="channelCombo">
+        <item>
+         <property name="text">
+          <string>1 路</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>2 路</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>4 路</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="motionCheckBox">
+        <property name="text">
+         <string>运动检测</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item><widget class="QPushButton" name="startStopButton">
         <property name="text">
          <string>启动预览</string>
         </property>
@@ -71,22 +106,24 @@
       <property name="orientation">
        <enum>Qt::Horizontal</enum>
       </property>
-      <widget class="QLabel" name="previewLabel">
-       <property name="minimumSize">
-        <size>
-         <width>640</width>
-         <height>480</height>
-        </size>
-       </property>
-       <property name="styleSheet">
-        <string>background-color: #101010; color: #888888; font-size: 16px;</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignCenter</set>
-       </property>
-       <property name="text">
-        <string>未启动</string>
-       </property>
+      <widget class="QWidget" name="previewGridWidget">
+       <layout class="QGridLayout" name="previewGridLayout">
+        <property name="spacing">
+         <number>4</number>
+        </property>
+        <property name="leftMargin">
+         <number>4</number>
+        </property>
+        <property name="topMargin">
+         <number>4</number>
+        </property>
+        <property name="rightMargin">
+         <number>4</number>
+        </property>
+        <property name="bottomMargin">
+         <number>4</number>
+        </property>
+       </layout>
       </widget>
       <widget class="QListWidget" name="eventList">
        <property name="minimumSize">

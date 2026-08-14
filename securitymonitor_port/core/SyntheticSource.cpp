@@ -20,9 +20,9 @@ bool SyntheticSource::read(cv::Mat& frame)
 
     frame = cv::Mat(480, 640, CV_8UC3, cv::Scalar(30, 30, 30));
 
-    // 移动方块，方便肉眼确认画面在动
-    const int x = (m_frameIndex * 6) % 560;
-    cv::rectangle(frame, cv::Rect(x, 200, 80, 80), cv::Scalar(0, 0, 255), 2);
+    // 移动方块：亮色保证灰度帧差能稳定触发运动检测（红色在灰度下与背景几乎同色，检测不到）
+    const int x = (m_frameIndex * 20) % 560;
+    cv::rectangle(frame, cv::Rect(x, 200, 80, 80), cv::Scalar(0, 255, 255), 2);
 
     cv::putText(frame, "TEST PATTERN", cv::Point(20, 40),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);

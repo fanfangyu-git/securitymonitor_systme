@@ -24,6 +24,10 @@ SOURCES += \
     core/CameraSource.cpp \
     core/FileSource.cpp \
     core/SyntheticSource.cpp \
+    core/PreviewChannel.cpp \
+    core/MotionDetector.cpp \
+    core/VideoRecorder.cpp \
+    core/StorageManager.cpp \
     service/DatabaseManager.cpp
 
 HEADERS += \
@@ -34,6 +38,11 @@ HEADERS += \
     core/CameraSource.h \
     core/FileSource.h \
     core/SyntheticSource.h \
+    core/PreviewChannel.h \
+    core/ImageConvert.h \
+    core/MotionDetector.h \
+    core/VideoRecorder.h \
+    core/StorageManager.h \
     service/DatabaseManager.h
 
 FORMS += \

@@ -60,6 +60,88 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
+bool DatabaseManager::addEvent(const QString& type, const QString& sourceName, const QString& detail)
+{
+    if (!m_initialized) {
+        qWarning() << "数据库未初始化，事件未写入:" << type << detail;
+        return false;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO event (type, source_name, detail) VALUES (?, ?, ?)");
+    query.addBindValue(type);
+    query.addBindValue(sourceName);
+    query.addBindValue(detail);
+    if (!query.exec()) {
+        qWarning() << "写入事件失败:" << query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::addVideoFile(const QString& sourceName, const QString& filePath,
+                                   const QString& startTime, const QString& endTime,
+                                   const QString& eventType, qint64 sizeBytes)
+{
+    if (!m_initialized) {
+        qWarning() << "数据库未初始化，录像记录未写入:" << filePath;
+        return false;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO video_file (source_name, file_path, start_time, end_time, event_type, size_bytes) "
+                  "VALUES (?, ?, ?, ?, ?, ?)");
+    query.addBindValue(sourceName);
+    query.addBindValue(filePath);
+    query.addBindValue(startTime);
+    query.addBindValue(endTime);
+    query.addBindValue(eventType);
+    query.addBindValue(sizeBytes);
+    if (!query.exec()) {
+        qWarning() << "写入录像记录失败:" << query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::deleteVideoByPath(const QString& filePath)
+{
+    if (!m_initialized) return false;
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+
+    if (!m_db.transaction()) {
+        qWarning() << "开启删除事务失败:" << m_db.lastError().text();
+    }
+
+    query.prepare("DELETE FROM video_file WHERE file_path = ?");
+    query.addBindValue(filePath);
+    if (!query.exec()) {
+        qWarning() << "删除录像记录失败:" << query.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+
+    // 事件记录中 motion / motion_end 的 detail 列存的是完整录像路径
+    query.prepare("DELETE FROM event WHERE detail = ?");
+    query.addBindValue(filePath);
+    if (!query.exec()) {
+        qWarning() << "删除关联事件记录失败:" << query.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+
+    if (!m_db.commit()) {
+        qWarning() << "提交删除事务失败:" << m_db.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+    return true;
+}
+
 bool DatabaseManager::createTables()
 {
     QSqlQuery query(m_db);
