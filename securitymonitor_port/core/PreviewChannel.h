@@ -32,7 +32,9 @@ Q_DECLARE_METATYPE(FaceBox)
 // 一路视频源的工作单元：采集线程 + 帧缓冲 + 消费线程。
 // 采集线程同时做运动检测：检测到运动自动开始录像，运动停止约0.5秒后结束录像。
 // 预览帧在消费线程直接转 QImage 发出（不经过线程池，保证实时）；
-// 人脸分析每 3 帧提交一次共享线程池（不阻塞预览），结果通过 faceBoxes 发给主线程叠加绘制。
+// 人脸框在消费线程对当前预览帧同步检测（框与画面严格对齐，不产生追尾延迟）；
+// 识别/比对每 3 帧提交一次共享线程池（不阻塞预览），只更新框上的姓名/是否已知，
+// 并上报 faceInfo/strangerCapture 事件，结果经 faceBoxes 发给主线程叠加绘制。
 class PreviewChannel : public QObject
 {
     Q_OBJECT
@@ -98,6 +100,9 @@ private:
     // 人脸识别（共享实例，不持有所有权；由主窗口加载模型与人员库）
     FaceAnalyzer* m_faceAnalyzer = nullptr;
     bool m_faceEnabled = false;
+    // 每路独立的人脸框检测器（YuNet 实例）：预览线程逐帧同步检测用，
+    // 不参与共享 FaceAnalyzer 的互斥锁，避免与异步识别互相阻塞
+    cv::Ptr<cv::FaceDetectorYN> m_boxDetector;
     std::atomic<int> m_faceFrameCounter{0};      // 人脸分析节流计数（每 3 帧一次）
     std::atomic<qint64> m_lastFaceEventMs{0};    // 陌生人/识别事件 5 秒节流
     std::atomic<qint64> m_lastCaptureMs{0};      // 陌生人截图 30 秒节流

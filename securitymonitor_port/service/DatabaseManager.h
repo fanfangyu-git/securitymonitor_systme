@@ -62,7 +62,7 @@ public:
                                            const QString& startTime = QString(),
                                            const QString& endTime = QString());
 
-    // 人员库（人脸登记）：face_feature 为 128 维特征序列化后的 512 字节
+    // 人员库（人脸登记）：face_feature 为 512 维特征序列化后的 2048 字节
     struct PersonInfo
     {
         int id = -1;

@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     }
     const qint64 maxStorageBytes = maxStorageMB * 1024 * 1024;
 
-    // --face-dir 路径：人脸模型目录（含 face_detection_yunet_*.onnx 与 face_recognition_sface_*.onnx）
+    // --face-dir 路径：人脸模型目录（含 face_detection_yunet_*.onnx 与 w600k_mbf.onnx）
     // 默认 exe 同级 models/；缺失时人脸识别功能自动禁用
     QString faceDir;
     const int faceIdx = args.indexOf(QStringLiteral("--face-dir"));

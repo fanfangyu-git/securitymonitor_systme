@@ -149,6 +149,32 @@ void PreviewChannel::consumeLoop()
         auto frame = m_buffer.waitAndPopNewest();
         if (!frame) continue;
 
+        // 1) 人脸框：每路用独立 YuNet 实例对当前预览帧同步检测（无锁），
+        //    框与画面严格对齐，消除"框追不上人"延迟，也不阻塞/被阻塞异步识别。
+        if (m_faceAnalyzer && m_faceEnabled) {
+            if (!m_boxDetector) {
+                m_boxDetector = m_faceAnalyzer->createDetector();
+            }
+            std::vector<FaceAnalyzer::Result> dets;
+            if (m_boxDetector &&
+                m_faceAnalyzer->detectBoxes(*frame, m_boxDetector, dets)) {
+                QVector<FaceBox> boxes;
+                boxes.reserve(static_cast<int>(dets.size()));
+                {
+                    QMutexLocker lock(&m_faceStateMutex);
+                    for (const auto& d : dets) {
+                        FaceBox b;
+                        b.x = d.face.x; b.y = d.face.y;
+                        b.w = d.face.width; b.h = d.face.height;
+                        b.name = m_stableName;
+                        b.known = m_stableKnown;
+                        boxes.append(b);
+                    }
+                }
+                emit faceBoxes(m_channelId, boxes);
+            }
+        }
+
         // 预览与人脸分析解耦：
         // 1) 预览：直接在本线程转 QImage 并发出，不经过线程池 —— 画面永远是最新帧，无积压延迟
         const QImage image = matToQImage(*frame);
@@ -156,7 +182,8 @@ void PreviewChannel::consumeLoop()
             emit frameReady(m_channelId, image);
         }
 
-        // 2) 人脸分析：每 3 帧提交一次线程池（积压过多时跳过本轮），不阻塞预览
+        // 2) 人脸识别（异步）：每 3 帧提交一次线程池（积压过多时跳过本轮），
+        //    只更新稳定身份/事件/截图，不再发人脸框（框由上面的同步检测负责）
         if (m_faceAnalyzer && m_faceEnabled && (++m_faceFrameCounter % 3) == 0) {
             if (m_pool->pendingCount() >= m_maxPendingTasks) continue;
 
@@ -193,18 +220,6 @@ void PreviewChannel::consumeLoop()
                     primary.name = self->m_stableName;
                     primary.known = self->m_stableKnown;
                 }
-
-                QVector<FaceBox> boxes;
-                boxes.reserve(static_cast<int>(results.size()));
-                for (const auto& r : results) {
-                    FaceBox b;
-                    b.x = r.face.x; b.y = r.face.y;
-                    b.w = r.face.width; b.h = r.face.height;
-                    b.name = r.name;
-                    b.known = r.known;
-                    boxes.append(b);
-                }
-                emit self->faceBoxes(id, boxes);
 
                 if (!results.empty()) {
                     const FaceAnalyzer::Result& r = results.front();

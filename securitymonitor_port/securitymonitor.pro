@@ -65,8 +65,12 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 win32 {
     OPENCV_BIN = D:/openCV4.5.5/x64/mingw/bin
     MINGW_BIN  = D:/Qt/Qt5.14.2/Tools/mingw730_64/bin
-    QMAKE_POST_LINK += cmd /c copy /Y $${OPENCV_BIN}/*.dll $${OUT_PWD}/
-    QMAKE_POST_LINK += & cmd /c copy /Y $${MINGW_BIN}/libgcc_s_seh-1.dll $${OUT_PWD}/
-    QMAKE_POST_LINK += & cmd /c copy /Y $${MINGW_BIN}/libstdc++-6.dll $${OUT_PWD}/
-    QMAKE_POST_LINK += & cmd /c copy /Y $${MINGW_BIN}/libwinpthread-1.dll $${OUT_PWD}/
+    # cmd 的 copy 无法解析正斜杠路径，全部转成反斜杠
+    OPENCV_BIN_WIN = $$shell_path($${OPENCV_BIN})
+    MINGW_BIN_WIN  = $$shell_path($${MINGW_BIN})
+    OUT_PWD_WIN    = $$shell_path($${OUT_PWD})
+    QMAKE_POST_LINK += cmd /c copy /Y $${OPENCV_BIN_WIN}\\*.dll $${OUT_PWD_WIN}
+    QMAKE_POST_LINK += & cmd /c copy /Y $${MINGW_BIN_WIN}\\libgcc_s_seh-1.dll $${OUT_PWD_WIN}
+    QMAKE_POST_LINK += & xcopy /Y /I $${MINGW_BIN_WIN}\\libstdc++-6.dll $${OUT_PWD_WIN}
+    QMAKE_POST_LINK += & cmd /c copy /Y $${MINGW_BIN_WIN}\\libwinpthread-1.dll $${OUT_PWD_WIN}
 }
