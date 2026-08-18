@@ -1,0 +1,21 @@
+# ===== 构建产物 =====
+build-*/
+*.o
+*.obj
+moc_*.cpp
+qrc_*.cpp
+Makefile
+Makefile.*
+
+# ===== 运行时产物 =====
+*.db
+**/records/
+**/captures/
+*.mp4
+*.avi
+
+# ===== Qt Creator 每机运行配置 =====
+securitymonitor_port/securitymonitor.pro.user
+
+# 说明: *.dll / securitymonitor.exe 等运行依赖当前仍被提交进仓库(保持开箱可用),
+# 如需彻底干净的仓库, 可改为用 QMAKE_POST_LINK 拷贝, 并把 *.dll / *.exe 加入本忽略列表。
