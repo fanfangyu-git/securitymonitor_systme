@@ -98,6 +98,15 @@ std::vector<FaceAnalyzer::Result> FaceAnalyzer::analyze(const cv::Mat& frame,
     for (int i = 0; i < static_cast<int>(results.size()); ++i) {
         Result& r = results[i];
         if (recognize) {
+            // 脸质量门控：置信度低（运动模糊/背光/极小脸）或尺寸过小时，
+            // 特征噪声大、比对结论不可靠——只出框不出结论（decided=false，
+            // feature 为空），由调用方保持上一身份，避免红绿闪烁误判。
+            const float* row = det.faces.ptr<float>(i);
+            const bool lowQuality = row[14] < m_minDetectScore ||
+                                    row[2] < m_minFaceSize ||
+                                    row[3] < m_minFaceSize;
+            if (lowQuality) continue;
+
             // 关键：5 点对齐必须接收 YuNet 输出的完整 1x15 人脸行
             // （x,y,w,h + 5 个关键点 + score），并与检测使用同一张缩放图，
             // 保证注册与识别特征一致；只传 x,y,w,h 无法对齐
@@ -124,6 +133,7 @@ std::vector<FaceAnalyzer::Result> FaceAnalyzer::analyze(const cv::Mat& frame,
             }
             r.score = best;
             r.known = best >= m_threshold;
+            r.decided = true;
         }
 
         if (drawOverlay) {

@@ -26,6 +26,7 @@ struct FaceBox
     int x = 0, y = 0, w = 0, h = 0;
     QString name;   // 命中人员库时为姓名，否则为空
     bool known = false;
+    bool pending = false; // true=身份判定中（质量门控/跟踪未建立），绘制中性色，不当作陌生人
 };
 Q_DECLARE_METATYPE(FaceBox)
 
@@ -108,15 +109,30 @@ private:
     std::atomic<qint64> m_lastCaptureMs{0};      // 陌生人截图 30 秒节流
     static const int m_captureIntervalMs = 30000; // 陌生人截图最小间隔（毫秒）
 
-    // 身份平滑（主脸判定）：快速移动/运动模糊时单帧可能误判陌生人，
-    // 连续 m_identityConfirmFrames 次一致才切换身份，避免红绿闪烁
-    QMutex m_faceStateMutex;                       // 保护以下身份状态（线程池任务访问）
-    QString m_stableName;                          // 当前稳定身份（空=陌生人）
-    bool m_stableKnown = false;
-    QString m_candidateName;                       // 候选身份（连续出现才切换）
-    bool m_candidateKnown = false;
-    int m_candidateCount = 0;                      // 候选连续出现次数
+    // 身份平滑（按人脸跟踪）：单帧可能因运动模糊/角度误判，
+    // 每个跟踪目标独立做「连续 m_identityConfirmFrames 次一致才切换」的平滑，
+    // 并带三区判定（>=knownThreshold 已知 / <=rejectThreshold 陌生人 / 中间保持现状），
+    // 目标连续未出现超过 m_trackMissLimit 轮后移除（身份随人脸消失而清除）
+    QMutex m_faceStateMutex;                       // 保护以下身份状态（线程池任务与预览线程访问）
+    struct TrackedFace
+    {
+        cv::Rect lastRect;      // 最近一次出现的人脸框（原图坐标），用于 IoU 关联
+        QString stableName;     // 稳定身份（空=陌生人）
+        bool stableKnown = false;
+        QString candName;       // 候选身份（连续一致才切换）
+        bool candKnown = false;
+        int candCount = 0;
+        int missFrames = 0;     // 连续未匹配轮数（每轮≈3 帧），超限删除
+    };
+    std::vector<TrackedFace> m_tracks;             // 当前画面中的人脸跟踪列表
+
+    // 三区阈值：相似度 >= 此值判定为已知（与 FaceAnalyzer 默认 0.4 一致）
+    static const double m_knownThreshold;
+    // 相似度 <= 此值判定为陌生人；两者之间为拒识区（保持上一身份，不漂移）
+    static const double m_rejectThreshold;
+    static const double m_trackIouMin;             // 人脸关联最小 IoU（0.3）
     static const int m_identityConfirmFrames = 2;  // 身份切换需连续确认次数
+    static const int m_trackMissLimit = 10;        // 跟踪目标连续 10 轮(≈1秒)未出现则移除
     static const int m_maxPendingTasks = 6;      // 线程池积压上限：超限跳过本轮人脸分析
 };
 

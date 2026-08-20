@@ -1,5 +1,6 @@
 #include "PreviewChannel.h"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -13,6 +14,24 @@
 #include "core/MotionDetector.h"
 #include "core/StorageManager.h"
 #include "core/VideoRecorder.h"
+
+namespace {
+
+// 两框交并比（IoU），用于跨帧人脸关联
+double rectIou(const cv::Rect& a, const cv::Rect& b)
+{
+    const cv::Rect inter = a & b;
+    if (inter.width <= 0 || inter.height <= 0) return 0.0;
+    const double ia = static_cast<double>(inter.area());
+    const double ua = static_cast<double>(a.area()) + b.area() - ia;
+    return ua > 0.0 ? ia / ua : 0.0;
+}
+
+} // namespace
+
+const double PreviewChannel::m_knownThreshold  = 0.4;  // 与 FaceAnalyzer 默认阈值一致
+const double PreviewChannel::m_rejectThreshold = 0.30; // 明确陌生人下限（拒识区 0.30~0.40）
+const double PreviewChannel::m_trackIouMin     = 0.3;
 
 PreviewChannel::PreviewChannel(int channelId,
                                std::unique_ptr<VideoSource> source,
@@ -162,12 +181,24 @@ void PreviewChannel::consumeLoop()
                 boxes.reserve(static_cast<int>(dets.size()));
                 {
                     QMutexLocker lock(&m_faceStateMutex);
+                    // 每张脸按 IoU 关联到自己的跟踪目标，取该目标独立的身份；
+                    // 新出现/尚未建立跟踪的脸标记 pending（识别中），不再套用主脸身份
                     for (const auto& d : dets) {
                         FaceBox b;
                         b.x = d.face.x; b.y = d.face.y;
                         b.w = d.face.width; b.h = d.face.height;
-                        b.name = m_stableName;
-                        b.known = m_stableKnown;
+                        double bestIou = 0.0;
+                        const TrackedFace* hit = nullptr;
+                        for (const auto& t : m_tracks) {
+                            const double v = rectIou(d.face, t.lastRect);
+                            if (v > bestIou) { bestIou = v; hit = &t; }
+                        }
+                        if (hit && bestIou >= m_trackIouMin) {
+                            b.name = hit->stableName;
+                            b.known = hit->stableKnown;
+                        } else {
+                            b.pending = true; // 身份判定中，画中性框
+                        }
                         boxes.append(b);
                     }
                 }
@@ -183,7 +214,7 @@ void PreviewChannel::consumeLoop()
         }
 
         // 2) 人脸识别（异步）：每 3 帧提交一次线程池（积压过多时跳过本轮），
-        //    只更新稳定身份/事件/截图，不再发人脸框（框由上面的同步检测负责）
+        //    只更新跟踪身份/事件/截图，不再发人脸框（框由上面的同步检测负责）
         if (m_faceAnalyzer && m_faceEnabled && (++m_faceFrameCounter % 3) == 0) {
             if (m_pool->pendingCount() >= m_maxPendingTasks) continue;
 
@@ -193,46 +224,89 @@ void PreviewChannel::consumeLoop()
                 // 每次都做完整比对（任务本身已按 3 帧节流），结论必然确定：陌生人或姓名
                 auto results = self->m_faceAnalyzer->analyze(*frame, true, false);
 
-                // 身份平滑（主脸）：快速移动/运动模糊时单帧可能把已知人员误判成陌生人，
-                // 连续 m_identityConfirmFrames 次一致才切换身份，避免红绿闪烁
-                if (!results.empty()) {
-                    FaceAnalyzer::Result& primary = results.front();
-                    QMutexLocker lock(&self->m_faceStateMutex);
-                    const bool sameAsStable =
-                        (primary.name == self->m_stableName) &&
-                        (primary.known == self->m_stableKnown);
-                    if (sameAsStable) {
-                        self->m_candidateCount = 0;
-                    } else if (primary.name == self->m_candidateName &&
-                               primary.known == self->m_candidateKnown) {
-                        ++self->m_candidateCount;
-                    } else {
-                        self->m_candidateName = primary.name;
-                        self->m_candidateKnown = primary.known;
-                        self->m_candidateCount = 1;
-                    }
-                    if (self->m_candidateCount >= self->m_identityConfirmFrames) {
-                        self->m_stableName = self->m_candidateName;
-                        self->m_stableKnown = self->m_candidateKnown;
-                        self->m_candidateCount = 0;
-                    }
-                    // 用稳定身份覆盖主脸判定（画框/事件/截图全部走平滑后结果）
-                    primary.name = self->m_stableName;
-                    primary.known = self->m_stableKnown;
-                }
+                QMutexLocker lock(&self->m_faceStateMutex);
 
-                if (!results.empty()) {
-                    const FaceAnalyzer::Result& r = results.front();
-                    // 事件节流：同一路 5 秒最多上报一次，避免事件列表刷屏
+                // 全部跟踪目标本轮未匹配计数 +1（用于过期清理）
+                for (auto& t : self->m_tracks) ++t.missFrames;
+
+                // 逐脸关联跟踪目标并独立做身份平滑（三区判定 + 连续确认）
+                for (auto& r : results) {
+                    // 质量门控未通过（decided=false）：只更新位置，不改变身份
+                    if (!r.decided) {
+                        for (auto& t : self->m_tracks) {
+                            if (rectIou(r.face, t.lastRect) >= self->m_trackIouMin) {
+                                t.lastRect = r.face;
+                                t.missFrames = 0;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // IoU 关联：命中已有目标则更新，否则新建跟踪
+                    TrackedFace* track = nullptr;
+                    double bestIou = 0.0;
+                    for (auto& t : self->m_tracks) {
+                        const double v = rectIou(r.face, t.lastRect);
+                        if (v > bestIou) { bestIou = v; track = &t; }
+                    }
+                    if (!track || bestIou < self->m_trackIouMin) {
+                        TrackedFace nf;
+                        nf.lastRect = r.face;
+                        nf.stableName = r.name;
+                        nf.stableKnown = r.known;
+                        self->m_tracks.push_back(nf);
+                        // 新目标直接采用本次判定（首帧），避免首次出现时闪"识别中"
+                        continue;
+                    }
+                    track->lastRect = r.face;
+                    track->missFrames = 0;
+
+                    // 三区判定：>=knownThreshold 已知；<=rejectThreshold 陌生人；
+                    // 中间为拒识区——保持该目标当前身份，不向任何方向漂移
+                    if (r.score >= self->m_knownThreshold) {
+                        if (r.name == track->stableName && track->stableKnown) {
+                            track->candCount = 0;
+                        } else if (r.name == track->candName && track->candKnown) {
+                            ++track->candCount;
+                        } else {
+                            track->candName = r.name;
+                            track->candKnown = true;
+                            track->candCount = 1;
+                        }
+                    } else if (r.score <= self->m_rejectThreshold) {
+                        if (track->stableName.isEmpty() && !track->stableKnown) {
+                            track->candCount = 0;
+                        } else if (track->candName.isEmpty() && !track->candKnown) {
+                            ++track->candCount;
+                        } else {
+                            track->candName.clear();
+                            track->candKnown = false;
+                            track->candCount = 1;
+                        }
+                    } else {
+                        // 拒识区：保持现状，消除候选（不因中间值抖动而切换）
+                        track->candCount = 0;
+                    }
+
+                    // 连续确认后才切换稳定身份（避免红绿闪烁）
+                    if (track->candCount >= self->m_identityConfirmFrames) {
+                        track->stableName = track->candName;
+                        track->stableKnown = track->candKnown;
+                        track->candCount = 0;
+                    }
+
+                    // 事件节流：同一路 5 秒最多上报一次，避免事件列表刷屏；
+                    // 结论使用该目标的稳定身份（与画框一致）
                     const qint64 now = QDateTime::currentMSecsSinceEpoch();
                     qint64 last = self->m_lastFaceEventMs.load();
                     if (now - last >= 5000 &&
                         self->m_lastFaceEventMs.compare_exchange_strong(last, now)) {
-                        emit self->faceInfo(id, r.name, r.known, r.score, r.feature);
+                        emit self->faceInfo(id, track->stableName, track->stableKnown,
+                                            r.score, r.feature);
                     }
 
                     // 陌生人自动截图：同一路 30 秒最多一张，保存分析过的那一帧
-                    if (!r.known) {
+                    if (!track->stableKnown) {
                         const qint64 nowCap = QDateTime::currentMSecsSinceEpoch();
                         qint64 lastCap = self->m_lastCaptureMs.load();
                         if (nowCap - lastCap >= self->m_captureIntervalMs &&
@@ -248,6 +322,14 @@ void PreviewChannel::consumeLoop()
                         }
                     }
                 }
+
+                // 过期清理：人脸持续未出现，身份随目标移除而清除（下张人脸不继承身份）
+                auto& tracks = self->m_tracks;
+                tracks.erase(std::remove_if(tracks.begin(), tracks.end(),
+                                            [self](const TrackedFace& t) {
+                                                return t.missFrames > self->m_trackMissLimit;
+                                            }),
+                             tracks.end());
             });
         }
     }

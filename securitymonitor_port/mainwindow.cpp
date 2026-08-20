@@ -311,13 +311,16 @@ void MainWindow::onChannelFrameReady(int channelId, const QImage& image)
     QPixmap pix = QPixmap::fromImage(image).scaled(
         target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 
-    // 叠加最近一次人脸框：绿框=已录人员+姓名，红框=stranger（坐标按显示缩放比例换算）
+    // 叠加最近一次人脸框：绿框=已录人员+姓名，红框=stranger，黄框=识别中
+    // （坐标按显示缩放比例换算；pending 为身份判定中，不作陌生人处理）
     if (channelId < m_faceBoxes.size() && !m_faceBoxes[channelId].isEmpty()) {
         const double sx = pix.width() / static_cast<double>(image.width());
         const double sy = pix.height() / static_cast<double>(image.height());
         QPainter painter(&pix);
         for (const FaceBox& b : m_faceBoxes[channelId]) {
-            const QColor color = b.known ? QColor(0, 255, 0) : QColor(255, 0, 0);
+            const QColor color = b.pending ? QColor(255, 200, 0)
+                                 : b.known  ? QColor(0, 255, 0)
+                                            : QColor(255, 0, 0);
             painter.setPen(QPen(color, 3));
             painter.drawRect(QRectF(b.x * sx, b.y * sy, b.w * sx, b.h * sy));
             painter.setPen(QPen(color));
@@ -325,8 +328,10 @@ void MainWindow::onChannelFrameReady(int channelId, const QImage& image)
             f.setPixelSize(qMax(12, qRound(22 * qMin(sx, sy))));
             f.setBold(true);
             painter.setFont(f);
-            painter.drawText(QPointF(b.x * sx, qMax(12.0, b.y * sy - 6)),
-                             b.known ? b.name : QStringLiteral("stranger"));
+            const QString label = b.pending ? QStringLiteral("识别中")
+                                 : b.known   ? b.name
+                                             : QStringLiteral("stranger");
+            painter.drawText(QPointF(b.x * sx, qMax(12.0, b.y * sy - 6)), label);
         }
         painter.end();
     }

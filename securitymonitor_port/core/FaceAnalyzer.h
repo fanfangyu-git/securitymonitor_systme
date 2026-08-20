@@ -30,8 +30,9 @@ public:
         cv::Rect face;
         QString name;      // 命中人员库则为姓名，否则为空（陌生人）
         bool known = false;
+        bool decided = false; // 是否完成可靠判决（质量门控通过才算；模糊/过小脸为 false，调用方不应切换身份/上报事件）
         double score = 0.0; // 余弦相似度（越大越像，>= threshold 判定为同一人）
-        QByteArray feature; // 该人脸 512 维特征（2048 字节），供登记用
+        QByteArray feature; // 该人脸 512 维特征（2048 字节），供登记用；质量门控未通过时为空
     };
 
     // 模型目录需包含 face_detection_yunet_2022mar.onnx 与 w600k_mbf.onnx
@@ -64,6 +65,15 @@ public:
     void setThreshold(double t) { m_threshold = t; }
     double threshold() const { return m_threshold; }
 
+    // 脸质量门控：YuNet 置信度（0~1）低于 m_minDetectScore，
+    // 或缩放工作图上的人脸边长小于 m_minFaceSize 时不做识别判决
+    // （特征噪声大，判决不可靠；只出框不出结论，由调用方保持上一身份）
+    void setQualityGate(double minDetectScore, int minFaceSize)
+    {
+        m_minDetectScore = minDetectScore;
+        m_minFaceSize = minFaceSize;
+    }
+
 private:
     struct Detection
     {
@@ -88,6 +98,8 @@ private:
     mutable QMutex m_mutex;
     bool m_ready = false;
     double m_threshold = 0.4;
+    double m_minDetectScore = 0.55; // YuNet 检测置信度下限（低于此值不判决）
+    int m_minFaceSize = 24;         // 缩放工作图上的最小人脸边长（像素）
     cv::Size m_inputSize;
     QString m_detectorModel; // YuNet 模型路径（供 createDetector 复制实例用）
 };
