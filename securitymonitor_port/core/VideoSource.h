@@ -16,5 +16,5 @@ public:
     virtual bool isOpen() const = 0;
     virtual QString name() const;
 };
-
+//为什么要抽象基类？4 个纯虚函数分别对应什么生命周期？
 #endif // VIDEOSOURCE_H

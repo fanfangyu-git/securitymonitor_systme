@@ -40,5 +40,5 @@ private:
     std::size_t m_capacity;
     bool m_stopped = false;
 };
-
+//缓冲满了为什么丢**最旧**帧而不是拒绝新帧？`waitAndPopNewest` 为什么要 `clear()`？
 #endif // FRAMEBUFFER_H

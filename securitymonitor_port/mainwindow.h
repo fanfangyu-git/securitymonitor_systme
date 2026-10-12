@@ -56,6 +56,7 @@ private slots:
     void onFaceInfo(int channelId, const QString& name, bool known,
                     double distance, const QByteArray& feature);
     void onFaceBoxes(int channelId, const QVector<FaceBox>& boxes);
+    void onFaceCandidates(int channelId, const QVector<FaceCandidate>& candidates);
     void onRegisterClicked();
     void onEventItemDoubleClicked(QListWidgetItem* item);
     void onHistoryClicked();
@@ -85,7 +86,7 @@ private:
     QString m_faceDir;             // 人脸模型目录（含两个 onnx）
     std::unique_ptr<FaceAnalyzer> m_faceAnalyzer;
     bool m_faceReady = false;      // 模型加载成功后才允许开启人脸识别
-    QByteArray m_lastFaceFeature;  // 最近一次检测到的人脸特征（供登记）
+    QVector<QVector<FaceCandidate>> m_faceCandidates; // 每路最近一轮登记候选（含平均特征）
     QVector<QVector<FaceBox>> m_faceBoxes; // 每路最近一次人脸框（主线程叠加绘制）
     qint64 m_maxStorageBytes = 0;  // 录像存储上限(字节)，0=不限制
     QTimer* m_quotaTimer = nullptr; // 容量检查兜底定时器（30 分钟）

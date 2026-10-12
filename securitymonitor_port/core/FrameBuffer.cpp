@@ -22,10 +22,14 @@ void FrameBuffer::put(std::shared_ptr<cv::Mat> frame)
 std::shared_ptr<cv::Mat> FrameBuffer::waitAndPopNewest()
 {
     std::unique_lock<std::mutex> lock(m_mutex);
+    //!m_buffer.empty()指的是 缓冲区不为空（如果是真的代表有frame可以继续执行，保护进入wait函数）
+    //当缓冲区为空的时候会进入阻塞，如果这时候想停止该消费者线程，外部置m_stopped为1并唤醒该线程即可
     m_cv.wait(lock, [this] { return m_stopped || !m_buffer.empty(); });
+
     if (m_buffer.empty()) return nullptr;
     auto frame = std::move(m_buffer.back());
     m_buffer.clear(); // 只保留最新帧，丢弃积压
+    //m_buffer.pop_back();
     return frame;
 }
 

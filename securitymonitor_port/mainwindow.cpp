@@ -26,6 +26,7 @@
 #include "AdminLoginDialog.h"
 #include "HistoryDialog.h"
 #include "PlaybackWindow.h"
+#include "RegisterFaceDialog.h"
 
 #include <QDesktopServices>
 #include <QListWidgetItem>
@@ -255,6 +256,8 @@ void MainWindow::setupChannels(int count)
                 this, &MainWindow::onFaceInfo, Qt::QueuedConnection);
         connect(channel.get(), &PreviewChannel::faceBoxes,
                 this, &MainWindow::onFaceBoxes, Qt::QueuedConnection);
+        connect(channel.get(), &PreviewChannel::faceCandidates,
+                this, &MainWindow::onFaceCandidates, Qt::QueuedConnection);
         connect(channel.get(), &PreviewChannel::strangerCapture,
                 this, &MainWindow::onStrangerCapture, Qt::QueuedConnection);
         m_channels.push_back(std::move(channel));
@@ -298,6 +301,7 @@ void MainWindow::clearChannels()
     }
     m_previewLabels.clear();
     m_faceBoxes.clear();
+    m_faceCandidates.clear();
 }
 
 void MainWindow::onChannelFrameReady(int channelId, const QImage& image)
@@ -421,7 +425,7 @@ void MainWindow::appendEvent(const QString& text, const QString& type,
 void MainWindow::onFaceInfo(int channelId, const QString& name, bool known,
                            double distance, const QByteArray& feature)
 {
-    if (!feature.isEmpty()) m_lastFaceFeature = feature; // 供"登记人脸"使用
+    Q_UNUSED(feature); // 登记特征改由 faceCandidates 全量候选提供（含多帧平均）
 
     if (known) {
         appendEvent(QStringLiteral("第 %1 路 识别到: %2（相似度 %3）")
@@ -445,6 +449,13 @@ void MainWindow::onFaceBoxes(int channelId, const QVector<FaceBox>& boxes)
     m_faceBoxes[channelId] = boxes;
 }
 
+void MainWindow::onFaceCandidates(int channelId, const QVector<FaceCandidate>& candidates)
+{
+    if (channelId < 0) return;
+    if (channelId >= m_faceCandidates.size()) m_faceCandidates.resize(channelId + 1);
+    m_faceCandidates[channelId] = candidates;
+}
+
 void MainWindow::onRegisterClicked()
 {
     // 管理员权限：登记人脸需先通过管理员验证（本会话内有效，重启后需重新登录）
@@ -454,33 +465,94 @@ void MainWindow::onRegisterClicked()
         updateAdminStatus();
     }
 
-    const QString name = ui->nameEdit->text().trimmed();
-    if (name.isEmpty()) {
+    // 收集所有通道的可登记人脸候选（特征非空 = 已有稳定平均特征）
+    QVector<RegisterFaceDialog::Candidate> cands;
+    for (int ch = 0; ch < m_faceCandidates.size(); ++ch) {
+        for (const FaceCandidate& fc : m_faceCandidates[ch]) {
+            if (fc.feature.isEmpty()) continue;
+            RegisterFaceDialog::Candidate c;
+            c.channel = ch;
+            c.face = fc;
+            cands.append(c);
+        }
+    }
+    if (cands.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("请先在上方输入要登记的姓名。"));
+                             QStringLiteral("暂无可登记的人脸：请开启人脸识别，"
+                                            "并让画面中有人脸（清晰可见）后再登记。"));
         return;
     }
-    if (m_lastFaceFeature.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("提示"),
-                             QStringLiteral("暂无人脸特征：请开启人脸识别，并让画面中有人脸后再登记。"));
-        return;
+
+    // 点名登记：用户选择登记哪一路的哪一张脸
+    RegisterFaceDialog dlg(cands, this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    const QString name = dlg.personName();
+    const RegisterFaceDialog::Candidate chosen = dlg.chosenCandidate();
+    if (name.isEmpty() || chosen.face.feature.isEmpty()) return;
+
+    const cv::Mat feature = FaceAnalyzer::bytesToFeature(chosen.face.feature);
+
+    // 重复登记检测：与现有人员库比对，相似度过高提示覆盖
+    int matchId = -1;
+    QString matchName;
+    double sim = 0.0;
+    const bool hasMatch = m_faceAnalyzer &&
+        m_faceAnalyzer->matchPerson(feature, &matchId, &matchName, &sim);
+
+    bool overwrite = false;
+    if (hasMatch && sim >= m_faceAnalyzer->threshold()) {
+        const QMessageBox::StandardButton btn = QMessageBox::question(
+            this, QStringLiteral("重复登记提示"),
+            QStringLiteral("该人脸与已登记人员「%1」相似度 %2，极可能是同一人。\n\n"
+                           "【是】覆盖更新「%1」的资料\n【否】取消本次登记")
+                .arg(matchName).arg(sim, 0, 'f', 2),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (btn != QMessageBox::Yes) return;
+        overwrite = true;
+    } else if (hasMatch) {
+        const QMessageBox::StandardButton btn = QMessageBox::question(
+            this, QStringLiteral("相似人员提示"),
+            QStringLiteral("该人脸与已登记人员「%1」相似度 %2（未达判定阈值）。\n"
+                           "仍要登记为「%3」吗？")
+                .arg(matchName).arg(sim, 0, 'f', 2).arg(name),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (btn != QMessageBox::Yes) return;
     }
 
     int id = -1;
-    if (!DatabaseManager::instance().addPerson(name, m_lastFaceFeature, &id)) {
-        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("人员登记失败（数据库错误）。"));
-        return;
+    if (overwrite) {
+        if (!DatabaseManager::instance().updatePerson(matchId, name, chosen.face.feature)) {
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("人员资料更新失败（数据库错误）。"));
+            return;
+        }
+        id = matchId;
+        FaceAnalyzer::Person p;
+        p.id = id;
+        p.name = name;
+        p.feature = feature;
+        m_faceAnalyzer->updatePerson(p);
+        appendEvent(QStringLiteral("覆盖登记人脸: %1（编号 %2，原「%3」）")
+                        .arg(name).arg(id).arg(matchName),
+                    QStringLiteral("register"),
+                    QStringLiteral("第 %1 路").arg(chosen.channel + 1), name);
+    } else {
+        if (!DatabaseManager::instance().addPerson(name, chosen.face.feature, &id)) {
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("人员登记失败（数据库错误）。"));
+            return;
+        }
+        FaceAnalyzer::Person p;
+        p.id = id;
+        p.name = name;
+        p.feature = feature;
+        m_faceAnalyzer->addPerson(p);
+        appendEvent(QStringLiteral("已登记人脸: %1（编号 %2，第 %3 路）")
+                        .arg(name).arg(id).arg(chosen.channel + 1),
+                    QStringLiteral("register"),
+                    QStringLiteral("第 %1 路").arg(chosen.channel + 1), name);
     }
 
-    FaceAnalyzer::Person p;
-    p.id = id;
-    p.name = name;
-    p.feature = FaceAnalyzer::bytesToFeature(m_lastFaceFeature);
-    m_faceAnalyzer->addPerson(p);
-
-    appendEvent(QStringLiteral("已登记人脸: %1（编号 %2）").arg(name).arg(id),
-                QStringLiteral("register"),
-                QStringLiteral("系统"), name);
     ui->nameEdit->clear();
     ui->statusLabel->setText(QStringLiteral("人脸识别就绪（%1 人）").arg(m_faceAnalyzer->personCount()));
 }

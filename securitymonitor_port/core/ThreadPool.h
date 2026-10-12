@@ -44,5 +44,5 @@ private:
     std::atomic<int> m_busy{0}; // 正在执行的任务数（drain 用）
     int m_workerCount;
 };
-
+//stop()` 和 `drain()` 区别是什么？`m_busy` 为什么必须是 atomic？
 #endif // THREADPOOL_H

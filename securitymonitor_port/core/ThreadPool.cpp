@@ -41,7 +41,7 @@ void ThreadPool::stop()
     m_workers.clear();
 }
 
-void ThreadPool::drain()
+void ThreadPool::drain()//等待那些正在工作的线程完成
 {
     std::unique_lock<std::mutex> lock(m_mutex);
     // 丢弃尚未开始的任务（引用即将销毁的通道对象），只等在途任务执行完
@@ -49,7 +49,7 @@ void ThreadPool::drain()
     m_cv.wait(lock, [this] { return m_busy == 0; });
 }
 
-std::size_t ThreadPool::pendingCount() const
+std::size_t ThreadPool::pendingCount() const//待处理的任务
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_tasks.size();

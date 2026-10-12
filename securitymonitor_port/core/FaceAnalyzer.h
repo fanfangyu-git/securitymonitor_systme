@@ -55,7 +55,12 @@ public:
     // 人员库（内存）
     void loadPersons(const std::vector<Person>& persons);
     void addPerson(const Person& person);
+    void updatePerson(const Person& person); // 按 id 更新（不存在则追加），覆盖登记用
     int personCount() const;
+
+    // 在人员库中查找与 feature 相似度最高的人员；返回是否命中（库非空且相似度有效）
+    bool matchPerson(const cv::Mat& feature, int* outId = nullptr,
+                     QString* outName = nullptr, double* outSim = nullptr) const;
 
     // 特征序列化（数据库 BLOB 存取：512 个 float = 2048 字节）
     static QByteArray featureToBytes(const cv::Mat& feature);

@@ -131,6 +131,26 @@ bool DatabaseManager::addPerson(const QString& name, const QByteArray& feature, 
     return true;
 }
 
+bool DatabaseManager::updatePerson(int id, const QString& name, const QByteArray& feature)
+{
+    if (!m_initialized) {
+        qWarning() << "数据库未初始化，人员更新失败:" << name;
+        return false;
+    }
+
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE person SET name = ?, face_feature = ? WHERE id = ?");
+    query.addBindValue(name);
+    query.addBindValue(feature);
+    query.addBindValue(id);
+    if (!query.exec()) {
+        qWarning() << "人员更新失败:" << query.lastError().text();
+        return false;
+    }
+    return query.numRowsAffected() > 0;
+}
+
 bool DatabaseManager::addVideoFile(const QString& sourceName, const QString& filePath,
                                    const QString& startTime, const QString& endTime,
                                    const QString& eventType, qint64 sizeBytes)

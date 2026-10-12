@@ -71,6 +71,8 @@ public:
     };
     QVector<PersonInfo> loadPersons();
     bool addPerson(const QString& name, const QByteArray& feature, int* outId = nullptr);
+    // 覆盖登记：按 id 更新姓名与特征（不存在时返回 false）
+    bool updatePerson(int id, const QString& name, const QByteArray& feature);
 
     // ---- 管理员（登记人脸权限）----
     // 默认管理员账号（首次运行自动创建，密码建议登录后修改）

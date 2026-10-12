@@ -243,6 +243,42 @@ void FaceAnalyzer::addPerson(const Person& person)
     m_persons.push_back(person);
 }
 
+void FaceAnalyzer::updatePerson(const Person& person)
+{
+    QMutexLocker locker(&m_mutex);
+    for (auto& p : m_persons) {
+        if (p.id == person.id) {
+            p.name = person.name;
+            p.feature = person.feature;
+            return;
+        }
+    }
+    m_persons.push_back(person);
+}
+
+bool FaceAnalyzer::matchPerson(const cv::Mat& feature, int* outId,
+                               QString* outName, double* outSim) const
+{
+    QMutexLocker locker(&m_mutex);
+    double best = -1.0;
+    const Person* bestP = nullptr;
+    for (const Person& p : m_persons) {
+        if (p.feature.empty() || p.feature.total() != feature.total()) continue;
+        const double sim = feature.dot(p.feature);
+        if (sim > best) {
+            best = sim;
+            bestP = &p;
+        }
+    }
+    if (bestP && best >= 0.0) {
+        if (outId) *outId = bestP->id;
+        if (outName) *outName = bestP->name;
+        if (outSim) *outSim = best;
+        return true;
+    }
+    return false;
+}
+
 int FaceAnalyzer::personCount() const
 {
     QMutexLocker locker(&m_mutex);

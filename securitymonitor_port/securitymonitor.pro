@@ -21,6 +21,7 @@ SOURCES += \
     AdminLoginDialog.cpp \
     PlaybackWindow.cpp \
     HistoryDialog.cpp \
+    RegisterFaceDialog.cpp \
     core/ThreadPool.cpp \
     core/FrameBuffer.cpp \
     core/VideoSource.cpp \
@@ -39,6 +40,7 @@ HEADERS += \
     AdminLoginDialog.h \
     PlaybackWindow.h \
     HistoryDialog.h \
+    RegisterFaceDialog.h \
     core/ThreadPool.h \
     core/FrameBuffer.h \
     core/VideoSource.h \

@@ -16,8 +16,9 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
     QApplication::setApplicationName("securitymonitor");
 
-    // faceBoxes 信号（QueuedConnection）需要 QVector<FaceBox> 元类型
+    // faceBoxes / faceCandidates 信号（QueuedConnection）需要对应元类型
     qRegisterMetaType<QVector<FaceBox>>("QVector<FaceBox>");
+    qRegisterMetaType<QVector<FaceCandidate>>("QVector<FaceCandidate>");
 
     const QStringList args = a.arguments();
     const bool testMode = args.contains("--test");

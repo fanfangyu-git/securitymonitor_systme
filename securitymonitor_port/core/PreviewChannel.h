@@ -30,6 +30,17 @@ struct FaceBox
 };
 Q_DECLARE_METATYPE(FaceBox)
 
+// 登记候选：某路某张人脸的当前信息（含稳定身份与平均特征，供点名登记）
+struct FaceCandidate
+{
+    int x = 0, y = 0, w = 0, h = 0;
+    QString name;      // 稳定身份（空=陌生人）
+    bool known = false;
+    double score = 0.0; // 最近一次余弦相似度
+    QByteArray feature; // 多帧平均后的 512 维特征（2048 字节）；空=暂无可靠特征（不可登记）
+};
+Q_DECLARE_METATYPE(FaceCandidate)
+
 // 一路视频源的工作单元：采集线程 + 帧缓冲 + 消费线程。
 // 采集线程同时做运动检测：检测到运动自动开始录像，运动停止约0.5秒后结束录像。
 // 预览帧在消费线程直接转 QImage 发出（不经过线程池，保证实时）；
@@ -71,12 +82,18 @@ signals:
                   double distance, const QByteArray& feature);
     // 最新人脸框（含识别结论：known/姓名），主线程叠加到预览画面
     void faceBoxes(int channelId, const QVector<FaceBox>& boxes);
+    // 每轮识别的全量人脸候选（含多帧平均特征，供点名登记；每 3 帧更新一次）
+    void faceCandidates(int channelId, const QVector<FaceCandidate>& candidates);
     void strangerCapture(int channelId, const QString& filePath);
 
 private:
     void captureLoop();
     void consumeLoop();
     void enforceStorageQuota();
+    // 提交一次人脸分析任务（识别+跟踪+事件+登记候选）到共享线程池
+    void submitFaceAnalysis(const std::shared_ptr<cv::Mat>& frame);
+    // 线程池内执行一轮人脸分析（analyze -> 逐脸跟踪 -> 三区判定 -> 事件/截图 -> 候选）
+    void analyzeAndTrack(const std::shared_ptr<cv::Mat>& frame);
 
     int m_channelId;
     std::unique_ptr<VideoSource> m_source;
@@ -107,7 +124,10 @@ private:
     std::atomic<int> m_faceFrameCounter{0};      // 人脸分析节流计数（每 3 帧一次）
     std::atomic<qint64> m_lastFaceEventMs{0};    // 陌生人/识别事件 5 秒节流
     std::atomic<qint64> m_lastCaptureMs{0};      // 陌生人截图 30 秒节流
+    std::atomic<bool> m_immediateTaskPending{false}; // 新脸即时识别任务是否在途（防重复提交）
+    std::atomic<qint64> m_immediateCooldownMs{0};   // 即时识别未建成跟踪后的冷却截止(ms)，避免反复触发
     static const int m_captureIntervalMs = 30000; // 陌生人截图最小间隔（毫秒）
+    static const qint64 m_immediateCooldown = 500; // 即时识别失败后冷却时长（毫秒）
 
     // 身份平滑（按人脸跟踪）：单帧可能因运动模糊/角度误判，
     // 每个跟踪目标独立做「连续 m_identityConfirmFrames 次一致才切换」的平滑，
@@ -123,6 +143,7 @@ private:
         bool candKnown = false;
         int candCount = 0;
         int missFrames = 0;     // 连续未匹配轮数（每轮≈3 帧），超限删除
+        std::vector<QByteArray> recentFeatures; // 最近多帧特征（登记用平均，抗单帧模糊）
     };
     std::vector<TrackedFace> m_tracks;             // 当前画面中的人脸跟踪列表
 
@@ -134,6 +155,7 @@ private:
     static const int m_identityConfirmFrames = 2;  // 身份切换需连续确认次数
     static const int m_trackMissLimit = 10;        // 跟踪目标连续 10 轮(≈1秒)未出现则移除
     static const int m_maxPendingTasks = 6;      // 线程池积压上限：超限跳过本轮人脸分析
+    static const int m_featureAvgFrames = 5;     // 登记候选特征取最近 5 帧平均（抗模糊）
 };
 
 #endif // PREVIEWCHANNEL_H
