@@ -1,21 +1,37 @@
-# ===== 构建产物 =====
+# ===== 构建产物（Qt 影子构建 / qmake / moc / uic）=====
 build-*/
 *.o
 *.obj
+*.a
+*.exe
+*.dll
+*.qmake.stash
+*.ui.autosave
 moc_*.cpp
+ui_*.h
 qrc_*.cpp
+object_script.*
 Makefile
 Makefile.*
 
 # ===== 运行时产物 =====
 *.db
+*.db-journal
 **/records/
 **/captures/
 *.mp4
 *.avi
+*.jpg
 
 # ===== Qt Creator 每机运行配置 =====
-securitymonitor_port/securitymonitor.pro.user
+*.pro.user
 
-# 说明: *.dll / securitymonitor.exe 等运行依赖当前仍被提交进仓库(保持开箱可用),
-# 如需彻底干净的仓库, 可改为用 QMAKE_POST_LINK 拷贝, 并把 *.dll / *.exe 加入本忽略列表。
+# ===== 说明 =====
+# 1) 运行所需的 Qt / OpenCV / MinGW 运行库（*.dll）与 securitymonitor.exe 一律不入库。
+#    securitymonitor.pro 的 win32 QMAKE_POST_LINK 会在构建后自动从
+#      ${OPENCV_BIN} = D:/openCV4.5.5/x64/mingw/bin
+#      ${MINGW_BIN}  = D:/Qt/Qt5.14.2/Tools/mingw730_64/bin
+#    拷贝到 $$OUT_PWD（含 libgcc_s_seh-1 / libstdc++-6 / libwinpthread-1）。
+# 2) models/*.onnx 是源码依赖（YuNet 人脸检测 + SFace / w600k_mbf 特征提取），
+#    必须保留，切勿加入忽略列表。
+# 3) 录像(*.avi/*.mp4)、陌生人抓拍(*.jpg)、SQLite 数据库(*.db) 均属运行时数据，不入库。
